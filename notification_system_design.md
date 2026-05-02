@@ -88,3 +88,81 @@ This document describes the backend notification service architecture, API contr
 - Secondary fallback: client polling with `GET /api/notifications?recipientId=...&isRead=false`.
 - Real-time freshness is achieved by keeping the backend stateless and emitting events from the notification service layer.
 - Logs track event publication attempts and failures so delivery issues can be diagnosed without impacting core request flow.
+
+## Database design
+
+### Choice and justification
+
+PostgreSQL is the recommended primary storage for notifications because it supports:
+- strong relational consistency for delivery status updates, read receipts, and deduplication;
+- efficient indexing on recipient and timestamp fields;
+- predictable query semantics for large notification fetches;
+- partitioning and archive strategies for high-scale retention.
+
+The schema is intentionally focused and extensible, with a single notification table that can be extended with metadata or JSONB payloads later.
+
+### Notification schema
+
+```sql
+CREATE TABLE notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  recipient_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  delivered_at TIMESTAMPTZ NULL,
+  payload JSONB NULL
+);
+
+CREATE INDEX idx_notifications_recipient_created_at
+  ON notifications (recipient_id, created_at DESC);
+
+CREATE INDEX idx_notifications_recipient_is_read_created_at
+  ON notifications (recipient_id, is_read, created_at DESC);
+```
+
+### Example queries
+
+- Insert a notification:
+
+```sql
+INSERT INTO notifications (recipient_id, title, body, payload)
+VALUES ($1, $2, $3, $4::jsonb)
+RETURNING id, recipient_id, title, body, created_at;
+```
+
+- Fetch unread notifications for a recipient, newest first:
+
+```sql
+SELECT id, recipient_id, title, body, is_read, created_at
+FROM notifications
+WHERE recipient_id = $1
+  AND is_read = false
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3;
+```
+
+- Mark a notification as read:
+
+```sql
+UPDATE notifications
+SET is_read = true,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, is_read, updated_at;
+```
+
+### Large-scale handling
+
+- Use keyset pagination for stable scroll behavior when recipients have large inboxes.
+- Partition the table by `recipient_id` or `created_at` when message volume grows beyond tens of millions of rows.
+- Archive old notifications to a secondary store or cold table to keep active indexes compact.
+- Maintain a write-optimized insertion path and avoid full-table scans by querying only the recipient-specific indexes.
+- Optionally add a `notification_status` field for multi-step delivery states without changing the core schema.
+
+### Notes
+
+- This design avoids a generic `notification_events` event store and keeps per-recipient lookup performant.
+- If a NoSQL alternative is desired later, use a document store with a collection keyed by `recipientId` and sorted notification arrays, but the current schema is optimized for relational access patterns.
