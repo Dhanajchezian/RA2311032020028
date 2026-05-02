@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "cd notification_app_be && ts-node-dev --respawn src/server.ts",
     "build": "cd notification_app_be && tsc",
-    "start": "cd notification_app_be && node dist/server.js"
+    "start": "cd notification_app_be && node dist/server.js",
+    "scheduler:run": "cd vehicle_maintenance_scheduler && ts-node src/index.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",

@@ -1,23 +1,39 @@
+import path from 'path';
+import dotenv from 'dotenv';
 import {randomUUID} from 'crypto';
 import {LogEntry, LogLevel, LogPackage, LoggerOptions} from './types';
 import {validateLogEntry} from './validator';
 import {sendLogPayload} from './apiClient';
 
-const DEFAULT_LOG_API_URL = process.env.LOG_API_URL ?? '';
-const DEFAULT_ACCESS_TOKEN = process.env.ACCESS_TOKEN ?? '';
+const envCandidates = [
+  path.resolve(process.cwd(), '../.env'),
+  path.resolve(__dirname, '../.env'),
+  path.resolve(__dirname, '../../.env'),
+];
+
+for (const candidate of envCandidates) {
+  try {
+    dotenv.config({ path: candidate });
+  } catch {
+    // continue trying other paths
+  }
+}
 
 function resolveOptions(options?: LoggerOptions): LoggerOptions {
   if (options?.logApiUrl && options?.accessToken) {
     return options;
   }
 
-  if (!DEFAULT_LOG_API_URL || !DEFAULT_ACCESS_TOKEN) {
+  const logApiUrl = process.env.LOG_API_URL ?? '';
+  const accessToken = process.env.ACCESS_TOKEN ?? '';
+
+  if (!logApiUrl || !accessToken) {
     throw new Error('Logging environment variables are required');
   }
 
   return {
-    logApiUrl: DEFAULT_LOG_API_URL,
-    accessToken: DEFAULT_ACCESS_TOKEN,
+    logApiUrl,
+    accessToken,
   };
 }
 
