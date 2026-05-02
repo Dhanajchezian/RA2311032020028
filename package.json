@@ -1,0 +1,22 @@
+{
+  "name": "RA2311032020028",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "cd notification_app_be && ts-node-dev --respawn src/server.ts",
+    "build": "cd notification_app_be && tsc",
+    "start": "cd notification_app_be && node dist/server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.17",
+    "@types/node": "^20.12.0",
+    "ts-node": "^10.9.1",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.6.2"
+  }
+}
