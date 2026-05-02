@@ -1,6 +1,16 @@
 # Notification System Design
 
-This document describes the backend notification service architecture, API contracts, and high-level real-time delivery strategy.
+This document describes the backend notification service architecture, API contracts, database choices, and query optimization strategy.
+
+## Stage tracking
+
+- **Stage 1:** Notification API design and request/response schema.
+- **Stage 2:** Database design and schema for large-scale notifications.
+- **Stage 3:** Query optimization and indexing strategy.
+
+## Stage 1: Notification system design
+
+This section describes the REST interface, request/response shapes, and delivery strategy.
 
 ## REST API endpoints
 
@@ -166,3 +176,58 @@ RETURNING id, is_read, updated_at;
 
 - This design avoids a generic `notification_events` event store and keeps per-recipient lookup performant.
 - If a NoSQL alternative is desired later, use a document store with a collection keyed by `recipientId` and sorted notification arrays, but the current schema is optimized for relational access patterns.
+
+## Stage 3: Query optimization
+
+### Given query
+
+```sql
+SELECT * FROM notifications
+WHERE studentId = 1042 AND isRead = false
+ORDER BY createdAt DESC;
+```
+
+### Inefficiencies
+
+- `SELECT *` retrieves unnecessary columns and prevents the optimizer from minimizing row size.
+- No selective index is shown for `studentId` and `isRead`; a full table scan is likely.
+- Sorting by `createdAt DESC` without an index on `(studentId, isRead, createdAt DESC)` forces an expensive sort operation.
+- Using `studentId` instead of the normalized `recipient_id` field is inconsistent with the present schema design.
+
+### Recommended optimization
+
+- Project only required columns instead of `*`.
+- Use an index that supports the filter and order by pattern.
+
+```sql
+CREATE INDEX idx_notifications_recipient_is_read_created_at
+  ON notifications (recipient_id, is_read, created_at DESC);
+```
+
+- Query with explicit columns:
+
+```sql
+SELECT id, recipient_id, title, body, is_read, created_at
+FROM notifications
+WHERE recipient_id = $1
+  AND is_read = false
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3;
+```
+
+### Cost explanation
+
+- The composite index allows the database to locate matching rows by `recipient_id` and `is_read` directly.
+- Ordering is then satisfied by the index without a separate sort step.
+- The index is narrower than indexing all columns, so it uses less space and maintains faster writes.
+- Using `LIMIT`/`OFFSET` is acceptable for small pages, but keyset pagination is preferred for high-volume inboxes.
+
+### Rejected bad advice
+
+- Do not index every column. That increases write amplification and storage cost without improving this query.
+- Do not rely on `studentId` if the schema uses `recipient_id`; use consistent column naming.
+- Do not use a single-row index on `createdAt` alone; the filter conditions must be served first.
+
+### Summary
+
+The best path is a composite index on `(recipient_id, is_read, created_at DESC)` plus a projection of only needed fields. This keeps reads efficient and avoids unnecessary full scans or sorts.
